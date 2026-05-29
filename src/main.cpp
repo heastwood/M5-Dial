@@ -33,6 +33,11 @@ static bool     needsRedraw   = true;
 static bool     pendingPublish = false;
 static uint32_t lastPublishMs  = 0;
 static long     lastEncoderVal = 0;
+static uint32_t lastActivityMs = 0;
+static bool     screenDimmed   = false;
+
+static constexpr uint32_t DIM_TIMEOUT_MS  = 7000;
+static constexpr uint32_t FADE_DURATION_MS = 1000;
 
 // ── Network objects ───────────────────────────────────────────────────────────
 WiFiClient   wifiClient;
@@ -225,6 +230,7 @@ void setup() {
 
     M5Dial.Display.fillScreen(TFT_BLACK);
     lastEncoderVal = M5Dial.Encoder.read();
+    lastActivityMs = millis();
     needsRedraw = true;
 }
 
@@ -246,6 +252,8 @@ void loop() {
     long delta  = encVal - lastEncoderVal;
     if (delta != 0) {
         lastEncoderVal = encVal;
+        lastActivityMs = millis();
+        if (screenDimmed) { M5Dial.Display.setBrightness(128); screenDimmed = false; needsRedraw = true; }
         if (!lightOn) { lightOn = true; } // first turn wakes the light
 
         brightness = constrain(brightness + (int)delta * BRIGHTNESS_STEP, 0, 255);
@@ -255,6 +263,8 @@ void loop() {
 
     // ── Encoder button → toggle on/off ────────────────────────────────────────
     if (M5Dial.BtnA.wasClicked()) {
+        lastActivityMs = millis();
+        if (screenDimmed) { M5Dial.Display.setBrightness(128); screenDimmed = false; needsRedraw = true; }
         lightOn        = !lightOn;
         needsRedraw    = true;
         pendingPublish = true;
@@ -263,6 +273,8 @@ void loop() {
     // ── Touch → next colour ───────────────────────────────────────────────────
     auto touch = M5Dial.Touch.getDetail();
     if (touch.wasClicked()) {
+        lastActivityMs = millis();
+        if (screenDimmed) { M5Dial.Display.setBrightness(128); screenDimmed = false; needsRedraw = true; }
         colorIndex = (colorIndex + 1) % NUM_COLORS;
         needsRedraw    = true;
         pendingPublish = true;
@@ -275,4 +287,17 @@ void loop() {
 
     // ── Redraw ────────────────────────────────────────────────────────────────
     if (needsRedraw) drawUI();
+
+    // ── Screen fade after inactivity ──────────────────────────────────────────
+    uint32_t idleMs = millis() - lastActivityMs;
+    if (idleMs >= DIM_TIMEOUT_MS + FADE_DURATION_MS) {
+        if (!screenDimmed) {
+            M5Dial.Display.setBrightness(0);
+            screenDimmed = true;
+        }
+    } else if (idleMs >= DIM_TIMEOUT_MS) {
+        uint32_t fadeMs = idleMs - DIM_TIMEOUT_MS;
+        uint8_t  bri    = (uint8_t)(128.0f * (FADE_DURATION_MS - fadeMs) / FADE_DURATION_MS);
+        M5Dial.Display.setBrightness(bri);
+    }
 }
