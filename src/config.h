@@ -15,6 +15,7 @@
 // In HA, configure an MQTT light with these topics (see README).
 #define LIGHT_CMD_TOPIC   "home/cync/set"
 #define LIGHT_STATE_TOPIC "home/cync/state"
+#define LIGHT_GET_TOPIC   "home/cync/get"   // dial publishes here on boot to request current state
 
 // ── Dial behaviour ────────────────────────────────────────────────────────────
 #define BRIGHTNESS_STEP   5     // brightness units changed per encoder detent

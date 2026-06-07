@@ -1,14 +1,13 @@
-# Add this to your Home Assistant configuration.yaml under `mqtt: light:`,
-# or place it in a separate file included via !include_dir_list.
+# Add these automations to Home Assistant (automations.yaml or via the UI).
+# Replace light.your_cync_bulb with your actual Cync entity ID everywhere.
 #
-# This tells HA to expose your Cync bulb over MQTT so the M5 Dial can
-# control it. The Cync integration must already be set up in HA so the
-# entity `light.cync_bulb` (adjust the name below) exists.
-#
-# Automation that bridges the MQTT dial commands → Cync entity:
+# Three automations:
+#   1. Dial command  -> Cync bulb  (set brightness / colour)
+#   2. Cync state    -> Dial       (keep dial in sync when bulb changes externally)
+#   3. Dial boot     -> Dial       (answer the dial's startup state-poll request)
 
 automation:
-  - alias: "M5 Dial → Cync brightness & colour"
+  - alias: "M5 Dial set Cync brightness and colour"
     trigger:
       - platform: mqtt
         topic: home/cync/set
@@ -17,7 +16,7 @@ automation:
           payload: "{{ trigger.payload_json }}"
       - service: light.turn_on
         target:
-          entity_id: light.your_cync_bulb   # ← change to your entity_id
+          entity_id: light.your_cync_bulb   # <- change to your entity_id
         data:
           brightness: "{{ payload.brightness | default(255) }}"
           rgb_color:
@@ -25,10 +24,35 @@ automation:
             - "{{ payload.color.g | default(255) }}"
             - "{{ payload.color.b | default(255) }}"
 
-  - alias: "Cync state → M5 Dial"
+  - alias: "Cync state publish to M5 Dial"
+    # Fires whenever the Cync bulb state changes (HA dashboard, voice, etc.)
+    # so the dial display stays in sync.
     trigger:
       - platform: state
-        entity_id: light.your_cync_bulb     # ← same entity_id
+        entity_id: light.your_cync_bulb     # <- same entity_id
+    action:
+      - service: mqtt.publish
+        data:
+          topic: home/cync/state
+          retain: true
+          payload: >
+            {
+              "state": "{{ states('light.your_cync_bulb') | upper }}",
+              "brightness": {{ state_attr('light.your_cync_bulb','brightness') | default(255) | int }},
+              "color": {
+                "r": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[0] }},
+                "g": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[1] }},
+                "b": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[2] }}
+              }
+            }
+
+  - alias: "M5 Dial boot poll reply"
+    # The dial publishes to home/cync/get on every power-on to request the
+    # current bulb state.  This automation answers that request so the dial
+    # shows the correct status immediately instead of waiting for a change.
+    trigger:
+      - platform: mqtt
+        topic: home/cync/get
     action:
       - service: mqtt.publish
         data:

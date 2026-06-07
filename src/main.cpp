@@ -30,6 +30,7 @@ static int      brightness    = 128; // 0-255
 static int      colorIndex    = 0;
 static bool     lightOn       = true;
 static bool     needsRedraw   = true;
+static bool     hasSynced     = false; // false until first state arrives from HA
 static bool     pendingPublish = false;
 static uint32_t lastPublishMs  = 0;
 static long     lastEncoderVal = 0;
@@ -122,7 +123,17 @@ static void drawColorDots() {
     }
 }
 
+static void drawSyncing() {
+    auto& d = M5Dial.Display;
+    d.fillScreen(TFT_BLACK);
+    d.setTextDatum(middle_center);
+    d.setTextColor(TFT_DARKGREY);
+    d.setFont(&fonts::FreeSans9pt7b);
+    d.drawString("Syncing...", 120, 120);
+}
+
 void drawUI() {
+    if (!hasSynced) { drawSyncing(); needsRedraw = false; return; }
     int pct = lightOn ? brightness * 100 / 255 : 0;
     drawBrightnessArc(pct);
     drawCenterText(pct, lightOn);
@@ -183,17 +194,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int len) {
         if (best != colorIndex) { colorIndex = best; changed = true; }
     }
 
+    if (!hasSynced) { hasSynced = true; changed = true; }
     if (changed) needsRedraw = true;
+}
+
+// Connect, subscribe, and request current state from HA.
+// Returns true on success.
+bool connectMqtt() {
+    if (!mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) return false;
+    mqtt.subscribe(LIGHT_STATE_TOPIC);
+    // Ask HA to publish its current state so the display is accurate on boot.
+    // Retained messages on LIGHT_STATE_TOPIC also satisfy this if the broker
+    // has them; either way we're covered.
+    mqtt.publish(LIGHT_GET_TOPIC, "");
+    return true;
 }
 
 void reconnectMqtt() {
     static uint32_t lastAttemptMs = 0;
     if (millis() - lastAttemptMs < 5000) return;
     lastAttemptMs = millis();
-
-    if (mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) {
-        mqtt.subscribe(LIGHT_STATE_TOPIC);
-    }
+    connectMqtt();
 }
 
 void connectWifi() {
@@ -228,10 +249,13 @@ void setup() {
     mqtt.setCallback(mqttCallback);
     mqtt.setBufferSize(256);
 
+    // Connect immediately — don't wait for loop()'s 5-second retry gate
+    connectMqtt();
+
     M5Dial.Display.fillScreen(TFT_BLACK);
     lastEncoderVal = M5Dial.Encoder.read();
     lastActivityMs = millis();
-    needsRedraw = true;
+    needsRedraw = true; // will show "Syncing..." until HA replies
 }
 
 void loop() {
