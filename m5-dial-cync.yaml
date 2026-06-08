@@ -453,16 +453,13 @@ binary_sensor:
   - platform: homeassistant
     id: lamp_state_ha
     entity_id: ${light_entity}
-    on_press:
-      # Lamp turned on (from any source)
+    on_state:
+      # Fires on every update including the initial value on boot,
+      # unlike on_press/on_release which only fire on transitions.
       - lambda: |-
-          id(lamp_on) = true;
-          if (id(ui_mode) != 1) id(ui_mode) = 0;
-    on_release:
-      # Lamp turned off (from any source)
-      - lambda: |-
-          id(lamp_on) = false;
-          id(ui_mode) = 0;
+          id(lamp_on) = x;
+          if (!x) id(ui_mode) = 0;
+          else if (id(ui_mode) != 1) id(ui_mode) = 0;
 
   - platform: gpio
     name: Button
