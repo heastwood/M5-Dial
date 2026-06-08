@@ -107,10 +107,6 @@ globals:
     type: int
     initial_value: '0'
     restore_value: no
-  - id: lamp_on               # mirrors HA lamp on/off state
-    type: bool
-    initial_value: 'false'
-    restore_value: no
   - id: last_encoder_ms       # millis() at last encoder tick (for velocity)
     type: uint32_t
     initial_value: '0'
@@ -192,7 +188,7 @@ display:
       it.fill(Color::BLACK);
       const int cx = 120, cy = 120;
 
-      if (!id(lamp_on)) {
+      if (!id(lamp_state_ha).state) {
         // ================ OFF SCREEN ================
         const int outer_r = 116;
         const int inner_r = 104;
@@ -322,7 +318,7 @@ touchscreen:
 
           if (id(ui_mode) == 0) {
             // Only open color picker if the lamp is actually on
-            if (id(lamp_on)) {
+            if (id(lamp_state_ha).state) {
               id(ui_mode) = 1;
             }
             return;
@@ -380,7 +376,7 @@ sensor:
           if (delta < 20) return;
           id(last_encoder_ms) = now;
 
-          if (id(ui_mode) == 0 || !id(lamp_on)) {
+          if (id(ui_mode) == 0 || !id(lamp_state_ha).state) {
             // Brightness mode (or lamp off -> rotating wakes it)
             int step = (delta < 80) ? 10 : (delta < 200) ? 5 : 2;
             id(brightness_val) = std::min(100, id(brightness_val) + step);
@@ -415,7 +411,7 @@ sensor:
           if (delta < 20) return;
           id(last_encoder_ms) = now;
 
-          if (id(ui_mode) == 0 || !id(lamp_on)) {
+          if (id(ui_mode) == 0 || !id(lamp_state_ha).state) {
             int step = (delta < 80) ? 10 : (delta < 200) ? 5 : 2;
             id(brightness_val) = std::max(0, id(brightness_val) - step);
             ESP_LOGD("encoder", "CCW bri=%d step=%d delta=%dms",
@@ -454,12 +450,9 @@ binary_sensor:
     id: lamp_state_ha
     entity_id: ${light_entity}
     on_state:
-      # Fires on every update including the initial value on boot,
-      # unlike on_press/on_release which only fire on transitions.
+      # Reset to brightness screen when lamp turns off from any source.
       - lambda: |-
-          id(lamp_on) = x;
           if (!x) id(ui_mode) = 0;
-          else if (id(ui_mode) != 1) id(ui_mode) = 0;
 
   - platform: gpio
     name: Button
@@ -495,7 +488,7 @@ binary_sensor:
               # Brightness / off screen: explicitly turn on or off
               - if:
                   condition:
-                    lambda: 'return id(lamp_on);'
+                    lambda: 'return id(lamp_state_ha).state;'
                   then:
                     - homeassistant.action:
                         action: light.turn_off
