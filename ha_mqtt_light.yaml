@@ -1,70 +1,106 @@
-# Add these automations to Home Assistant (automations.yaml or via the UI).
-# Replace light.your_cync_bulb with your actual Cync entity ID everywhere.
+# ha_mqtt_light.yaml
+# ──────────────────────────────────────────────────────────────────────────────
+# M5 Dial <-> Cync light bridge for Home Assistant
 #
-# Three automations:
-#   1. Dial command  -> Cync bulb  (set brightness / colour)
-#   2. Cync state    -> Dial       (keep dial in sync when bulb changes externally)
-#   3. Dial boot     -> Dial       (answer the dial's startup state-poll request)
+# SETUP
+#   1. Replace every occurrence of  light.your_cync_bulb  with your actual
+#      Cync entity ID (find it in HA > Settings > Devices & Services > Entities).
+#   2. Paste the contents into your automations.yaml, or import each block
+#      via the HA UI (Settings > Automations > + > Edit in YAML).
+#   3. Reload automations: Developer Tools > YAML > All Automations.
+#
+# MQTT TOPICS (must match the values in src/config.h)
+#   home/cync/set    dial -> HA   command (brightness, colour, on/off)
+#   home/cync/state  HA  -> dial  state feedback, published with retain=true
+#   home/cync/get    dial -> HA   empty boot-poll; triggers an immediate reply
+# ──────────────────────────────────────────────────────────────────────────────
 
 automation:
-  - alias: "M5 Dial set Cync brightness and colour"
+
+  # ── 1. Dial command -> Cync bulb ───────────────────────────────────────────
+  # Receives {"state":"ON","brightness":200,"color":{"r":255,"g":147,"b":41}}
+  # or        {"state":"OFF",...} and applies it to the Cync entity.
+  # mode: queued so rapid dial spins don't race each other.
+  - id: m5dial_cync_set
+    alias: "M5 Dial -> Cync: apply brightness and colour"
+    mode: queued
+    max: 5
     trigger:
       - platform: mqtt
         topic: home/cync/set
+    variables:
+      payload: "{{ trigger.payload_json }}"
     action:
-      - variables:
-          payload: "{{ trigger.payload_json }}"
-      - service: light.turn_on
-        target:
-          entity_id: light.your_cync_bulb   # <- change to your entity_id
-        data:
-          brightness: "{{ payload.brightness | default(255) }}"
-          rgb_color:
-            - "{{ payload.color.r | default(255) }}"
-            - "{{ payload.color.g | default(255) }}"
-            - "{{ payload.color.b | default(255) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ payload.state | upper == 'OFF' }}"
+            sequence:
+              - action: light.turn_off
+                target:
+                  entity_id: light.your_cync_bulb
+        default:
+          - action: light.turn_on
+            target:
+              entity_id: light.your_cync_bulb
+            data:
+              brightness: "{{ payload.brightness | default(255) | int }}"
+              rgb_color:
+                - "{{ payload.color.r | default(255) | int }}"
+                - "{{ payload.color.g | default(255) | int }}"
+                - "{{ payload.color.b | default(255) | int }}"
 
-  - alias: "Cync state publish to M5 Dial"
-    # Fires whenever the Cync bulb state changes (HA dashboard, voice, etc.)
-    # so the dial display stays in sync.
+  # ── 2. Cync state change -> dial display ───────────────────────────────────
+  # Fires whenever the bulb changes from any source (HA dashboard, voice
+  # assistant, another automation, etc.) and pushes the new state to the dial
+  # so its display stays in sync.
+  # mode: restart collapses rapid state churn into a single publish.
+  - id: m5dial_cync_state_push
+    alias: "Cync -> M5 Dial: push state on change"
+    mode: restart
     trigger:
       - platform: state
-        entity_id: light.your_cync_bulb     # <- same entity_id
+        entity_id: light.your_cync_bulb
     action:
-      - service: mqtt.publish
+      - action: mqtt.publish
         data:
           topic: home/cync/state
           retain: true
           payload: >
             {
               "state": "{{ states('light.your_cync_bulb') | upper }}",
-              "brightness": {{ state_attr('light.your_cync_bulb','brightness') | default(255) | int }},
+              "brightness": {{ state_attr('light.your_cync_bulb', 'brightness') | default(255) | int }},
               "color": {
-                "r": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[0] }},
-                "g": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[1] }},
-                "b": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[2] }}
+                "r": {{ (state_attr('light.your_cync_bulb', 'rgb_color') or [255,255,255])[0] | int }},
+                "g": {{ (state_attr('light.your_cync_bulb', 'rgb_color') or [255,255,255])[1] | int }},
+                "b": {{ (state_attr('light.your_cync_bulb', 'rgb_color') or [255,255,255])[2] | int }}
               }
             }
 
-  - alias: "M5 Dial boot poll reply"
-    # The dial publishes to home/cync/get on every power-on to request the
-    # current bulb state.  This automation answers that request so the dial
-    # shows the correct status immediately instead of waiting for a change.
+  # ── 3. Dial boot poll -> immediate state reply ─────────────────────────────
+  # On every power-on the dial publishes an empty message to home/cync/get
+  # before it has any state.  This automation answers with the live bulb state
+  # so the display is accurate from the moment it boots, regardless of whether
+  # a retained message exists on the broker.
+  - id: m5dial_cync_boot_poll
+    alias: "M5 Dial boot poll -> reply with current Cync state"
+    mode: queued
+    max: 3
     trigger:
       - platform: mqtt
         topic: home/cync/get
     action:
-      - service: mqtt.publish
+      - action: mqtt.publish
         data:
           topic: home/cync/state
           retain: true
           payload: >
             {
               "state": "{{ states('light.your_cync_bulb') | upper }}",
-              "brightness": {{ state_attr('light.your_cync_bulb','brightness') | default(255) | int }},
+              "brightness": {{ state_attr('light.your_cync_bulb', 'brightness') | default(255) | int }},
               "color": {
-                "r": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[0] }},
-                "g": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[1] }},
-                "b": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[2] }}
+                "r": {{ (state_attr('light.your_cync_bulb', 'rgb_color') or [255,255,255])[0] | int }},
+                "g": {{ (state_attr('light.your_cync_bulb', 'rgb_color') or [255,255,255])[1] | int }},
+                "b": {{ (state_attr('light.your_cync_bulb', 'rgb_color') or [255,255,255])[2] | int }}
               }
             }
