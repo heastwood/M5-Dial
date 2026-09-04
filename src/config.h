@@ -11,11 +11,17 @@
 #define MQTT_PASSWORD    "mqtt_pass"
 #define MQTT_CLIENT_ID   "m5dial_cync"
 
-// ── Home Assistant MQTT Light topics ─────────────────────────────────────────
-// In HA, configure an MQTT light with these topics (see README).
-#define LIGHT_CMD_TOPIC   "home/cync/set"
-#define LIGHT_STATE_TOPIC "home/cync/state"
-#define LIGHT_GET_TOPIC   "home/cync/get"   // dial publishes here on boot to request current state
+// ── Devices (Home Assistant MQTT lights) ───────────────────────────────────────
+// In HA, configure an MQTT light for each device with these topics (see README).
+#define LAMP1_NAME        "Lamp 1"
+#define LAMP1_CMD_TOPIC   "home/lamp1/set"
+#define LAMP1_STATE_TOPIC "home/lamp1/state"
+#define LAMP1_GET_TOPIC   "home/lamp1/get"
+
+#define LAMP2_NAME        "Lamp 2"
+#define LAMP2_CMD_TOPIC   "home/lamp2/set"
+#define LAMP2_STATE_TOPIC "home/lamp2/state"
+#define LAMP2_GET_TOPIC   "home/lamp2/get"
 
 // ── Dial behaviour ────────────────────────────────────────────────────────────
 #define BRIGHTNESS_STEP   5     // brightness units changed per encoder detent
