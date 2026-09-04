@@ -385,6 +385,7 @@ void loop() {
             screenState       = DEVICE_CONTROL;
             needsRedraw       = true;
         } else if (isBackIconTouch(touch.x, touch.y)) {
+            if (pendingPublish) publishState();
             screenState       = HOME;
             activeDeviceIndex = -1;
             needsRedraw       = true;
