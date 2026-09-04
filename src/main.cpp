@@ -333,7 +333,7 @@ void setup() {
     M5Dial.Display.fillScreen(TFT_BLACK);
     lastEncoderVal = M5Dial.Encoder.read();
     lastActivityMs = millis();
-    needsRedraw = true; // shows the home screen (or "Syncing..." if a device screen is active)
+    needsRedraw = true; // triggers the first draw of the home screen
 }
 
 void loop() {
