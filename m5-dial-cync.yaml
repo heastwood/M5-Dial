@@ -1,6 +1,6 @@
 # =============================================================================
 # M5 Dial -> GE Cync Light Controller (via Home Assistant)
-# Bulb: light.table_lamp_2
+# Bulb: light.table_lamp_2 (see `light_entity` substitution below)
 #
 # Base hardware definitions are aligned to the canonical reference at
 #   https://devices.esphome.io/devices/m5stack-dial/
@@ -11,7 +11,7 @@
 # =============================================================================
 
 substitutions:
-  light_entity: light.left_nightstand_lamp
+  light_entity: light.table_lamp_2
 
 esphome:
   name: m5-dial-cync
