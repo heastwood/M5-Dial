@@ -1,22 +1,24 @@
 # Add these automations to Home Assistant (automations.yaml or via the UI).
-# Replace light.your_cync_bulb with your actual Cync entity ID everywhere.
+# Replace light.your_lamp1_bulb / light.your_lamp2_bulb with your actual
+# Cync entity IDs everywhere.
 #
-# Three automations:
+# Three automations per lamp:
 #   1. Dial command  -> Cync bulb  (set brightness / colour)
 #   2. Cync state    -> Dial       (keep dial in sync when bulb changes externally)
 #   3. Dial boot     -> Dial       (answer the dial's startup state-poll request)
 
 automation:
-  - alias: "M5 Dial set Cync brightness and colour"
+  # ── Lamp 1 ──────────────────────────────────────────────────────────────────
+  - alias: "M5 Dial set Lamp 1 brightness and colour"
     trigger:
       - platform: mqtt
-        topic: home/cync/set
+        topic: home/lamp1/set
     action:
       - variables:
           payload: "{{ trigger.payload_json }}"
       - service: light.turn_on
         target:
-          entity_id: light.your_cync_bulb   # <- change to your entity_id
+          entity_id: light.your_lamp1_bulb   # <- change to your entity_id
         data:
           brightness: "{{ payload.brightness | default(255) }}"
           rgb_color:
@@ -24,47 +26,105 @@ automation:
             - "{{ payload.color.g | default(255) }}"
             - "{{ payload.color.b | default(255) }}"
 
-  - alias: "Cync state publish to M5 Dial"
-    # Fires whenever the Cync bulb state changes (HA dashboard, voice, etc.)
+  - alias: "Lamp 1 state publish to M5 Dial"
+    # Fires whenever the Lamp 1 bulb state changes (HA dashboard, voice, etc.)
     # so the dial display stays in sync.
     trigger:
       - platform: state
-        entity_id: light.your_cync_bulb     # <- same entity_id
+        entity_id: light.your_lamp1_bulb     # <- same entity_id
     action:
       - service: mqtt.publish
         data:
-          topic: home/cync/state
+          topic: home/lamp1/state
           retain: true
           payload: >
             {
-              "state": "{{ states('light.your_cync_bulb') | upper }}",
-              "brightness": {{ state_attr('light.your_cync_bulb','brightness') | default(255) | int }},
+              "state": "{{ states('light.your_lamp1_bulb') | upper }}",
+              "brightness": {{ state_attr('light.your_lamp1_bulb','brightness') | default(255) | int }},
               "color": {
-                "r": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[0] }},
-                "g": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[1] }},
-                "b": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[2] }}
+                "r": {{ (state_attr('light.your_lamp1_bulb','rgb_color') or [255,255,255])[0] }},
+                "g": {{ (state_attr('light.your_lamp1_bulb','rgb_color') or [255,255,255])[1] }},
+                "b": {{ (state_attr('light.your_lamp1_bulb','rgb_color') or [255,255,255])[2] }}
               }
             }
 
-  - alias: "M5 Dial boot poll reply"
-    # The dial publishes to home/cync/get on every power-on to request the
-    # current bulb state.  This automation answers that request so the dial
+  - alias: "M5 Dial boot poll reply — Lamp 1"
+    # The dial publishes to home/lamp1/get on every power-on to request the
+    # current bulb state. This automation answers that request so the dial
     # shows the correct status immediately instead of waiting for a change.
     trigger:
       - platform: mqtt
-        topic: home/cync/get
+        topic: home/lamp1/get
     action:
       - service: mqtt.publish
         data:
-          topic: home/cync/state
+          topic: home/lamp1/state
           retain: true
           payload: >
             {
-              "state": "{{ states('light.your_cync_bulb') | upper }}",
-              "brightness": {{ state_attr('light.your_cync_bulb','brightness') | default(255) | int }},
+              "state": "{{ states('light.your_lamp1_bulb') | upper }}",
+              "brightness": {{ state_attr('light.your_lamp1_bulb','brightness') | default(255) | int }},
               "color": {
-                "r": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[0] }},
-                "g": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[1] }},
-                "b": {{ (state_attr('light.your_cync_bulb','rgb_color') or [255,255,255])[2] }}
+                "r": {{ (state_attr('light.your_lamp1_bulb','rgb_color') or [255,255,255])[0] }},
+                "g": {{ (state_attr('light.your_lamp1_bulb','rgb_color') or [255,255,255])[1] }},
+                "b": {{ (state_attr('light.your_lamp1_bulb','rgb_color') or [255,255,255])[2] }}
+              }
+            }
+
+  # ── Lamp 2 ──────────────────────────────────────────────────────────────────
+  - alias: "M5 Dial set Lamp 2 brightness and colour"
+    trigger:
+      - platform: mqtt
+        topic: home/lamp2/set
+    action:
+      - variables:
+          payload: "{{ trigger.payload_json }}"
+      - service: light.turn_on
+        target:
+          entity_id: light.your_lamp2_bulb   # <- change to your entity_id
+        data:
+          brightness: "{{ payload.brightness | default(255) }}"
+          rgb_color:
+            - "{{ payload.color.r | default(255) }}"
+            - "{{ payload.color.g | default(255) }}"
+            - "{{ payload.color.b | default(255) }}"
+
+  - alias: "Lamp 2 state publish to M5 Dial"
+    trigger:
+      - platform: state
+        entity_id: light.your_lamp2_bulb     # <- same entity_id
+    action:
+      - service: mqtt.publish
+        data:
+          topic: home/lamp2/state
+          retain: true
+          payload: >
+            {
+              "state": "{{ states('light.your_lamp2_bulb') | upper }}",
+              "brightness": {{ state_attr('light.your_lamp2_bulb','brightness') | default(255) | int }},
+              "color": {
+                "r": {{ (state_attr('light.your_lamp2_bulb','rgb_color') or [255,255,255])[0] }},
+                "g": {{ (state_attr('light.your_lamp2_bulb','rgb_color') or [255,255,255])[1] }},
+                "b": {{ (state_attr('light.your_lamp2_bulb','rgb_color') or [255,255,255])[2] }}
+              }
+            }
+
+  - alias: "M5 Dial boot poll reply — Lamp 2"
+    trigger:
+      - platform: mqtt
+        topic: home/lamp2/get
+    action:
+      - service: mqtt.publish
+        data:
+          topic: home/lamp2/state
+          retain: true
+          payload: >
+            {
+              "state": "{{ states('light.your_lamp2_bulb') | upper }}",
+              "brightness": {{ state_attr('light.your_lamp2_bulb','brightness') | default(255) | int }},
+              "color": {
+                "r": {{ (state_attr('light.your_lamp2_bulb','rgb_color') or [255,255,255])[0] }},
+                "g": {{ (state_attr('light.your_lamp2_bulb','rgb_color') or [255,255,255])[1] }},
+                "b": {{ (state_attr('light.your_lamp2_bulb','rgb_color') or [255,255,255])[2] }}
               }
             }
