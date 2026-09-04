@@ -1,0 +1,21 @@
+# ── Secrets (NEVER commit these) ─────────────────────────────────────────────
+secrets.yaml
+secrets.json
+.env
+.env.*
+*.local             # catches secrets.local.yaml, config.local.h, etc.
+
+# ── PlatformIO build artefacts ────────────────────────────────────────────────
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# ── ESPHome build artefacts ───────────────────────────────────────────────────
+.esphome/
+
+# ── Editor / OS clutter ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
