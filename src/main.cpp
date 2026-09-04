@@ -25,20 +25,43 @@ static const ColorPreset COLORS[] = {
 };
 static constexpr int NUM_COLORS = sizeof(COLORS) / sizeof(COLORS[0]);
 
+// ── Devices ───────────────────────────────────────────────────────────────────
+struct Device {
+    const char* name;
+    const char* cmdTopic;
+    const char* stateTopic;
+    const char* getTopic;
+    bool        stateKnown; // false until first state message arrives from HA
+    bool        on;
+    int         brightness; // 0-255
+    int         colorIndex; // index into COLORS
+};
+
+static constexpr int NUM_DEVICES = 2;
+static Device devices[NUM_DEVICES] = {
+    { LAMP1_NAME, LAMP1_CMD_TOPIC, LAMP1_STATE_TOPIC, LAMP1_GET_TOPIC, false, true, 128, 0 },
+    { LAMP2_NAME, LAMP2_CMD_TOPIC, LAMP2_STATE_TOPIC, LAMP2_GET_TOPIC, false, true, 128, 0 },
+};
+
+// ── Screen state ──────────────────────────────────────────────────────────────
+enum ScreenState { HOME, DEVICE_CONTROL };
+static ScreenState screenState       = HOME;
+static int         activeDeviceIndex = -1; // meaningful only in DEVICE_CONTROL
+
 // ── State ─────────────────────────────────────────────────────────────────────
-static int      brightness    = 128; // 0-255
-static int      colorIndex    = 0;
-static bool     lightOn       = true;
-static bool     needsRedraw   = true;
-static bool     hasSynced     = false; // false until first state arrives from HA
+static bool     needsRedraw    = true;
 static bool     pendingPublish = false;
 static uint32_t lastPublishMs  = 0;
 static long     lastEncoderVal = 0;
 static uint32_t lastActivityMs = 0;
 static bool     screenDimmed   = false;
 
-static constexpr uint32_t DIM_TIMEOUT_MS  = 7000;
+static constexpr uint32_t DIM_TIMEOUT_MS   = 7000;
 static constexpr uint32_t FADE_DURATION_MS = 1000;
+
+static constexpr int BACK_ICON_X      = 24;
+static constexpr int BACK_ICON_Y      = 24;
+static constexpr int BACK_ICON_TOUCH_R = 22; // tap-target radius, bigger than the drawn icon
 
 // ── Network objects ───────────────────────────────────────────────────────────
 WiFiClient   wifiClient;
@@ -55,7 +78,7 @@ void connectWifi();
 // Display helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void drawBrightnessArc(int pct) {
+static void drawBrightnessArc(int pct, int colorIndex) {
     // pct: 0-100
     auto& d = M5Dial.Display;
     const int cx = 120, cy = 120, r = 100, thick = 14;
@@ -74,7 +97,7 @@ static void drawBrightnessArc(int pct) {
     }
 }
 
-static void drawCenterText(int pct, bool on) {
+static void drawCenterText(int pct, bool on, int colorIndex) {
     auto& d = M5Dial.Display;
     d.fillCircle(120, 120, 82, TFT_BLACK);
 
@@ -106,7 +129,7 @@ static void drawCenterText(int pct, bool on) {
     d.drawString(COLORS[colorIndex].name, 120, 148);
 }
 
-static void drawColorDots() {
+static void drawColorDots(int colorIndex) {
     auto& d = M5Dial.Display;
     // Ring of small dots showing all presets; active one is highlighted
     const int cx = 120, cy = 120, ringR = 80, dotR = 6;
@@ -123,6 +146,20 @@ static void drawColorDots() {
     }
 }
 
+static void drawBackIcon() {
+    auto& d = M5Dial.Display;
+    d.fillCircle(BACK_ICON_X, BACK_ICON_Y, 16, 0x2104);
+    d.setTextDatum(middle_center);
+    d.setTextColor(TFT_WHITE);
+    d.setFont(&fonts::FreeSans9pt7b);
+    d.drawString("<", BACK_ICON_X, BACK_ICON_Y + 1);
+}
+
+static bool isBackIconTouch(int x, int y) {
+    int dx = x - BACK_ICON_X, dy = y - BACK_ICON_Y;
+    return (dx * dx + dy * dy) <= (BACK_ICON_TOUCH_R * BACK_ICON_TOUCH_R);
+}
+
 static void drawSyncing() {
     auto& d = M5Dial.Display;
     d.fillScreen(TFT_BLACK);
@@ -132,13 +169,40 @@ static void drawSyncing() {
     d.drawString("Syncing...", 120, 120);
 }
 
+static void drawHomeScreen() {
+    auto& d = M5Dial.Display;
+    d.fillScreen(TFT_BLACK);
+    const int tileH = 120;
+    d.setFont(&fonts::FreeSansBold12pt7b);
+    for (int i = 0; i < NUM_DEVICES; i++) {
+        int cy = i * tileH + tileH / 2;
+        uint32_t dotCol = 0x39C7; // neutral grey (state not yet known)
+        if (devices[i].stateKnown) {
+            dotCol = devices[i].on ? d.color888(0, 220, 0) : d.color888(120, 120, 120);
+        }
+        d.setTextDatum(middle_center);
+        d.setTextColor(TFT_WHITE);
+        d.drawString(devices[i].name, 120, cy);
+        d.fillCircle(200, cy, 8, dotCol);
+    }
+    d.drawFastHLine(20, tileH, 200, 0x39C7);
+}
+
 void drawUI() {
-    if (!hasSynced) { drawSyncing(); needsRedraw = false; return; }
-    int pct = lightOn ? brightness * 100 / 255 : 0;
-    drawBrightnessArc(pct);
-    drawCenterText(pct, lightOn);
-    // Color dots only when on
-    if (lightOn) drawColorDots();
+    if (screenState == HOME) {
+        drawHomeScreen();
+        needsRedraw = false;
+        return;
+    }
+
+    Device& dev = devices[activeDeviceIndex];
+    if (!dev.stateKnown) { drawSyncing(); needsRedraw = false; return; }
+
+    int pct = dev.on ? dev.brightness * 100 / 255 : 0;
+    drawBrightnessArc(pct, dev.colorIndex);
+    drawCenterText(pct, dev.on, dev.colorIndex);
+    if (dev.on) drawColorDots(dev.colorIndex);
+    drawBackIcon();
     needsRedraw = false;
 }
 
@@ -147,25 +211,37 @@ void drawUI() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void publishState() {
-    if (!mqtt.connected()) return;
+    if (!mqtt.connected() || activeDeviceIndex < 0) return;
+    Device& dev = devices[activeDeviceIndex];
 
     JsonDocument doc;
-    doc["state"]      = lightOn ? "ON" : "OFF";
-    doc["brightness"] = brightness;
+    doc["state"]      = dev.on ? "ON" : "OFF";
+    doc["brightness"] = dev.brightness;
     JsonObject color  = doc["color"].to<JsonObject>();
-    color["r"] = COLORS[colorIndex].r;
-    color["g"] = COLORS[colorIndex].g;
-    color["b"] = COLORS[colorIndex].b;
+    color["r"] = COLORS[dev.colorIndex].r;
+    color["g"] = COLORS[dev.colorIndex].g;
+    color["b"] = COLORS[dev.colorIndex].b;
 
     char buf[128];
     serializeJson(doc, buf, sizeof(buf));
-    mqtt.publish(LIGHT_CMD_TOPIC, buf, /*retain=*/false);
+    mqtt.publish(dev.cmdTopic, buf, /*retain=*/false);
     lastPublishMs  = millis();
     pendingPublish = false;
 }
 
+static int deviceIndexForStateTopic(const char* topic) {
+    for (int i = 0; i < NUM_DEVICES; i++) {
+        if (strcmp(topic, devices[i].stateTopic) == 0) return i;
+    }
+    return -1;
+}
+
 void mqttCallback(char* topic, byte* payload, unsigned int len) {
     // Parse state updates pushed from HA so the dial stays in sync
+    int idx = deviceIndexForStateTopic(topic);
+    if (idx < 0) return;
+    Device& dev = devices[idx];
+
     JsonDocument doc;
     if (deserializeJson(doc, payload, len) != DeserializationError::Ok) return;
 
@@ -173,40 +249,42 @@ void mqttCallback(char* topic, byte* payload, unsigned int len) {
 
     if (doc["state"].is<const char*>()) {
         bool on = strcmp(doc["state"], "ON") == 0;
-        if (on != lightOn) { lightOn = on; changed = true; }
+        if (on != dev.on) { dev.on = on; changed = true; }
     }
     if (doc["brightness"].is<int>()) {
         int b = doc["brightness"].as<int>();
         b = constrain(b, 0, 255);
-        if (b != brightness) { brightness = b; changed = true; }
+        if (b != dev.brightness) { dev.brightness = b; changed = true; }
     }
     if (doc["color"].is<JsonObject>()) {
         uint8_t r = doc["color"]["r"] | 255;
         uint8_t g = doc["color"]["g"] | 255;
         uint8_t b = doc["color"]["b"] | 255;
         // Find closest preset by minimising squared distance
-        int best = colorIndex, bestDist = INT_MAX;
+        int best = dev.colorIndex, bestDist = INT_MAX;
         for (int i = 0; i < NUM_COLORS; i++) {
             int dr = r - COLORS[i].r, dg = g - COLORS[i].g, db = b - COLORS[i].b;
             int d = dr*dr + dg*dg + db*db;
             if (d < bestDist) { bestDist = d; best = i; }
         }
-        if (best != colorIndex) { colorIndex = best; changed = true; }
+        if (best != dev.colorIndex) { dev.colorIndex = best; changed = true; }
     }
 
-    if (!hasSynced) { hasSynced = true; changed = true; }
+    if (!dev.stateKnown) { dev.stateKnown = true; changed = true; }
     if (changed) needsRedraw = true;
 }
 
-// Connect, subscribe, and request current state from HA.
+// Connect, subscribe, and request current state for every device from HA.
 // Returns true on success.
 bool connectMqtt() {
     if (!mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) return false;
-    mqtt.subscribe(LIGHT_STATE_TOPIC);
-    // Ask HA to publish its current state so the display is accurate on boot.
-    // Retained messages on LIGHT_STATE_TOPIC also satisfy this if the broker
-    // has them; either way we're covered.
-    mqtt.publish(LIGHT_GET_TOPIC, "");
+    for (int i = 0; i < NUM_DEVICES; i++) {
+        mqtt.subscribe(devices[i].stateTopic);
+        // Ask HA to publish its current state so tiles/screens are accurate on boot.
+        // Retained messages on stateTopic also satisfy this if the broker has them;
+        // either way we're covered.
+        mqtt.publish(devices[i].getTopic, "");
+    }
     return true;
 }
 
@@ -255,7 +333,7 @@ void setup() {
     M5Dial.Display.fillScreen(TFT_BLACK);
     lastEncoderVal = M5Dial.Encoder.read();
     lastActivityMs = millis();
-    needsRedraw = true; // will show "Syncing..." until HA replies
+    needsRedraw = true; // shows the home screen (or "Syncing..." if a device screen is active)
 }
 
 void loop() {
@@ -271,37 +349,51 @@ void loop() {
     if (!mqtt.connected()) reconnectMqtt();
     mqtt.loop();
 
-    // ── Rotary encoder → brightness ───────────────────────────────────────────
+    // ── Rotary encoder → brightness (device control screen only) ─────────────
     long encVal = M5Dial.Encoder.read();
     long delta  = encVal - lastEncoderVal;
-    if (delta != 0) {
-        lastEncoderVal = encVal;
+    lastEncoderVal = encVal;
+    if (delta != 0 && screenState == DEVICE_CONTROL) {
         lastActivityMs = millis();
         if (screenDimmed) { M5Dial.Display.setBrightness(128); screenDimmed = false; needsRedraw = true; }
-        if (!lightOn) { lightOn = true; } // first turn wakes the light
+        Device& dev = devices[activeDeviceIndex];
+        if (!dev.on) dev.on = true; // first turn wakes the light
 
-        brightness = constrain(brightness + (int)delta * BRIGHTNESS_STEP, 0, 255);
+        dev.brightness = constrain(dev.brightness + (int)delta * BRIGHTNESS_STEP, 0, 255);
         needsRedraw    = true;
         pendingPublish = true;
     }
 
-    // ── Encoder button → toggle on/off ────────────────────────────────────────
-    if (M5Dial.BtnA.wasClicked()) {
+    // ── Encoder button → toggle on/off (device control screen only) ──────────
+    if (M5Dial.BtnA.wasClicked() && screenState == DEVICE_CONTROL) {
         lastActivityMs = millis();
         if (screenDimmed) { M5Dial.Display.setBrightness(128); screenDimmed = false; needsRedraw = true; }
-        lightOn        = !lightOn;
+        Device& dev = devices[activeDeviceIndex];
+        dev.on         = !dev.on;
         needsRedraw    = true;
         pendingPublish = true;
     }
 
-    // ── Touch → next colour ───────────────────────────────────────────────────
+    // ── Touch → tile select (home) / colour cycle or back (device screen) ────
     auto touch = M5Dial.Touch.getDetail();
     if (touch.wasClicked()) {
         lastActivityMs = millis();
         if (screenDimmed) { M5Dial.Display.setBrightness(128); screenDimmed = false; needsRedraw = true; }
-        colorIndex = (colorIndex + 1) % NUM_COLORS;
-        needsRedraw    = true;
-        pendingPublish = true;
+
+        if (screenState == HOME) {
+            activeDeviceIndex = (touch.y < 120) ? 0 : 1;
+            screenState       = DEVICE_CONTROL;
+            needsRedraw       = true;
+        } else if (isBackIconTouch(touch.x, touch.y)) {
+            screenState       = HOME;
+            activeDeviceIndex = -1;
+            needsRedraw       = true;
+        } else {
+            Device& dev = devices[activeDeviceIndex];
+            dev.colorIndex = (dev.colorIndex + 1) % NUM_COLORS;
+            needsRedraw    = true;
+            pendingPublish = true;
+        }
     }
 
     // ── Debounced publish ─────────────────────────────────────────────────────
